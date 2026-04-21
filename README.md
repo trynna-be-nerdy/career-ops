@@ -16,6 +16,7 @@
   <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
   <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
   <img src="https://img.shields.io/badge/Codex_(soon)-6B7280?style=flat&logo=openai&logoColor=white" alt="Codex">
+  <img src="https://img.shields.io/badge/Ollama-000?style=flat&logo=ollama&logoColor=white" alt="Ollama">
   <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
@@ -70,7 +71,7 @@ Built by someone who used it to evaluate 740+ job offers, generate 100+ tailored
 | **Negotiation Scripts** | Salary negotiation frameworks, geographic discount pushback, competing offer leverage |
 | **ATS PDF Generation** | Keyword-injected CVs with Space Grotesk + DM Sans design |
 | **Portal Scanner** | 45+ companies pre-configured (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + custom queries across Ashby, Greenhouse, Lever, Wellfound |
-| **Batch Processing** | Parallel evaluation with `claude -p` workers |
+| **Batch Processing** | Parallel evaluation with Ollama (local) or `claude -p` workers |
 | **Dashboard TUI** | Terminal UI to browse, filter, and sort your pipeline |
 | **Human-in-the-Loop** | AI evaluates and recommends, you decide and act. The system never submits an application -- you always have the final call |
 | **Pipeline Integrity** | Automated merge, dedup, status normalization, health checks |
@@ -109,6 +110,33 @@ claude   # Open Claude Code in this directory
 > **The system is designed to be customized by Claude itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask Claude to change them. It reads the same files it uses, so it knows exactly what to edit.
 
 See [docs/SETUP.md](docs/SETUP.md) for the full setup guide.
+
+## Local LLM Batch (Ollama)
+
+The batch pipeline can run entirely on your own hardware using [Ollama](https://ollama.com) instead of Claude. Interactive sessions (scanning, single evaluations, PDF generation) still use Claude Code — only the batch workers are replaced.
+
+```bash
+# 1. Install Ollama and pull a model (Gemma 4 27B recommended)
+ollama pull gemma4:27b
+
+# 2. Run batch — Ollama is the default backend
+./batch/batch-runner.sh --dry-run
+./batch/batch-runner.sh --parallel 2
+
+# 3. To use a different model
+OLLAMA_MODEL=llama3.3:70b ./batch/batch-runner.sh
+
+# 4. To fall back to Claude for a run
+./batch/batch-runner.sh --backend claude
+```
+
+**What changes with Ollama batch:**
+- No Claude API calls or Claude Max subscription needed for batch
+- Worker pre-loads all context (JD, cv.md, article-digest.md, template) into one prompt
+- WebSearch for comp data requires `pip install duckduckgo-search` (optional)
+- Playwright portal scanning and interactive modes still use Claude Code as normal
+
+**Requirements:** Python 3.10+, Ollama running locally, a model with ≥32K context (Gemma 4 27B works well).
 
 ## Usage
 
@@ -202,7 +230,8 @@ career-ops/
 │   └── states.yml               # Canonical statuses
 ├── batch/
 │   ├── batch-prompt.md          # Self-contained worker prompt
-│   └── batch-runner.sh          # Orchestrator script
+│   ├── batch-runner.sh          # Orchestrator script
+│   └── ollama-worker.py         # Local LLM worker (Ollama backend)
 ├── dashboard/                   # Go TUI pipeline viewer
 ├── data/                        # Your tracking data (gitignored)
 ├── reports/                     # Evaluation reports (gitignored)
@@ -215,12 +244,14 @@ career-ops/
 ## Tech Stack
 
 ![Claude Code](https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-000?style=flat&logo=ollama&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white)
 ![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white)
 ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white)
 ![Bubble Tea](https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white)
 
 - **Agent**: Claude Code with custom skills and modes
+- **Batch backend**: Ollama (local, default) or `claude -p` (Claude Max)
 - **PDF**: Playwright/Puppeteer + HTML template
 - **Scanner**: Playwright + Greenhouse API + WebSearch
 - **Dashboard**: Go + Bubble Tea + Lipgloss (Catppuccin Mocha theme)
