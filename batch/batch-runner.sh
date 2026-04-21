@@ -28,11 +28,12 @@ RETRY_FAILED=false
 START_FROM=0
 MAX_RETRIES=2
 MIN_SCORE=0
+BACKEND="ollama"
+OLLAMA_MODEL="${OLLAMA_MODEL:-gemma4:27b}"
 
 usage() {
   cat <<'USAGE'
-career-ops batch runner — process job offers in batch via claude -p workers
-Uses your default Claude model (Claude Max subscription).
+career-ops batch runner — process job offers in batch via Ollama or claude -p workers
 
 Usage: batch-runner.sh [OPTIONS]
 
@@ -43,7 +44,12 @@ Options:
   --start-from N       Start from offer ID N (skip earlier IDs)
   --max-retries N      Max retry attempts per offer (default: 2)
   --min-score N        Skip PDF/tracker for offers scoring below N (default: 0 = off)
+  --backend BACKEND    Worker backend: ollama (default) or claude
   -h, --help           Show this help
+
+Environment (Ollama backend):
+  OLLAMA_URL           Ollama base URL (default: http://localhost:11434)
+  OLLAMA_MODEL         Model name (default: gemma4:27b)
 
 Files:
   batch-input.tsv      Input offers (id, url, source, notes)
@@ -76,6 +82,7 @@ while [[ $# -gt 0 ]]; do
     --start-from) START_FROM="$2"; shift 2 ;;
     --max-retries) MAX_RETRIES="$2"; shift 2 ;;
     --min-score) MIN_SCORE="$2"; shift 2 ;;
+    --backend) BACKEND="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1"; usage; exit 1 ;;
   esac
@@ -119,8 +126,24 @@ check_prerequisites() {
     exit 1
   fi
 
-  if ! command -v claude &>/dev/null; then
-    echo "ERROR: 'claude' CLI not found in PATH."
+  if [[ "$BACKEND" == "ollama" ]]; then
+    if ! command -v python3 &>/dev/null; then
+      echo "ERROR: 'python3' not found in PATH (required for Ollama backend)."
+      exit 1
+    fi
+    if ! curl -sf "${OLLAMA_URL:-http://localhost:11434}/api/tags" &>/dev/null; then
+      echo "ERROR: Ollama not reachable at ${OLLAMA_URL:-http://localhost:11434}. Is it running?"
+      exit 1
+    fi
+    echo "Backend: Ollama (model: $OLLAMA_MODEL)"
+  elif [[ "$BACKEND" == "claude" ]]; then
+    if ! command -v claude &>/dev/null; then
+      echo "ERROR: 'claude' CLI not found in PATH."
+      exit 1
+    fi
+    echo "Backend: Claude"
+  else
+    echo "ERROR: Unknown backend '$BACKEND'. Use 'ollama' or 'claude'."
     exit 1
   fi
 
@@ -350,16 +373,30 @@ process_offer() {
     -e "s|{{ID}}|${esc_id}|g" \
     "$PROMPT_FILE" > "$resolved_prompt"
 
-  # Launch claude -p worker (uses default model from Claude Max subscription)
+  # Launch worker
   local exit_code=0
-  claude -p \
-    --dangerously-skip-permissions \
-    --append-system-prompt-file "$resolved_prompt" \
-    "$prompt" \
-    > "$log_file" 2>&1 || exit_code=$?
-
-  # Cleanup resolved prompt
-  rm -f "$resolved_prompt"
+  if [[ "$BACKEND" == "ollama" ]]; then
+    # Ollama worker: pre-loads all context, calls Ollama API, writes outputs directly
+    OLLAMA_MODEL="$OLLAMA_MODEL" \
+    python3 "$BATCH_DIR/ollama-worker.py" \
+      --id "$id" \
+      --url "$url" \
+      --jd-file "$jd_file" \
+      --report-num "$report_num" \
+      --date "$date" \
+      --prompt-file "$PROMPT_FILE" \
+      --project-dir "$PROJECT_DIR" \
+      > "$log_file" 2>&1 || exit_code=$?
+    rm -f "$resolved_prompt"
+  else
+    # Claude -p worker (original behaviour)
+    claude -p \
+      --dangerously-skip-permissions \
+      --append-system-prompt-file "$resolved_prompt" \
+      "$prompt" \
+      > "$log_file" 2>&1 || exit_code=$?
+    rm -f "$resolved_prompt"
+  fi
 
   local completed_at
   completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -461,7 +498,7 @@ main() {
   fi
 
   echo "=== career-ops batch runner ==="
-  echo "Parallel: $PARALLEL | Max retries: $MAX_RETRIES"
+  echo "Backend: $BACKEND | Parallel: $PARALLEL | Max retries: $MAX_RETRIES"
   echo "Input: $total_input offers"
   echo ""
 
