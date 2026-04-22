@@ -115,28 +115,91 @@ See [docs/SETUP.md](docs/SETUP.md) for the full setup guide.
 
 The batch pipeline can run entirely on your own hardware using [Ollama](https://ollama.com) instead of Claude. Interactive sessions (scanning, single evaluations, PDF generation) still use Claude Code — only the batch workers are replaced.
 
+### Prerequisites
+
+- Python 3.10+
+- [Ollama](https://ollama.com) installed and running
+- A model with ≥32K context window (Gemma 4 27B recommended)
+- `pip install duckduckgo-search` (optional — enables comp research in Block D)
+
+### Step 1 — Pull a model
+
 ```bash
-# 1. Install Ollama and pull a model (Gemma 4 27B recommended)
 ollama pull gemma4:27b
 
-# 2. Run batch — Ollama is the default backend
+# Verify Ollama is running
+curl http://localhost:11434/api/tags
+```
+
+### Step 2 — Add offers to the batch input
+
+Create `batch/batch-input.tsv` with one offer per line (tab-separated):
+
+```
+id	url	source	notes
+1	https://jobs.ashby.com/company/example/role/123	ashby	seen on linkedin
+2	https://boards.greenhouse.io/example/jobs/456	greenhouse
+3	https://jobs.lever.co/example/789	lever	referral
+```
+
+The `source` and `notes` columns are optional but help with tracking.
+
+### Step 3 — Dry run to preview
+
+```bash
+cd career-ops
 ./batch/batch-runner.sh --dry-run
+```
+
+### Step 4 — Run the batch
+
+```bash
+# Process all pending offers (sequential)
+./batch/batch-runner.sh
+
+# Process 2 at a time (parallel)
 ./batch/batch-runner.sh --parallel 2
 
-# 3. To use a different model
+# Use a different model
 OLLAMA_MODEL=llama3.3:70b ./batch/batch-runner.sh
 
-# 4. To fall back to Claude for a run
+# Custom Ollama URL (e.g. remote instance)
+OLLAMA_URL=http://192.168.1.10:11434 ./batch/batch-runner.sh
+
+# Only retry previously failed offers
+./batch/batch-runner.sh --retry-failed
+
+# Fall back to Claude for this run
 ./batch/batch-runner.sh --backend claude
 ```
 
-**What changes with Ollama batch:**
-- No Claude API calls or Claude Max subscription needed for batch
-- Worker pre-loads all context (JD, cv.md, article-digest.md, template) into one prompt
-- WebSearch for comp data requires `pip install duckduckgo-search` (optional)
-- Playwright portal scanning and interactive modes still use Claude Code as normal
+### Step 5 — Review results
 
-**Requirements:** Python 3.10+, Ollama running locally, a model with ≥32K context (Gemma 4 27B works well).
+After the batch completes, the runner automatically merges tracker additions and verifies pipeline integrity.
+
+```
+reports/          ← Evaluation reports (001-company-2026-04-21.md)
+output/           ← ATS-optimized PDFs
+batch/logs/       ← Per-offer logs for debugging
+data/applications.md  ← Tracker updated automatically
+```
+
+To check the pipeline health manually:
+
+```bash
+npm run verify    # pipeline integrity
+npm run merge     # re-run tracker merge if needed
+```
+
+### How Ollama batch differs from Claude batch
+
+| | Claude backend | Ollama backend |
+|---|---|---|
+| Tool calls | Claude Code reads files, fetches URLs | Python pre-loads all context upfront |
+| WebSearch (comp data) | Built-in | Optional (`duckduckgo-search` pip package) |
+| Playwright | Available | Not used in batch (same as before) |
+| Cost | Claude Max subscription | Free (local compute) |
+| Speed | Depends on API | Depends on your GPU |
 
 ## Usage
 
